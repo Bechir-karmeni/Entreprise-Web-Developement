@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f7faf8;
+  color: #13231c;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #0e1a15;
+    color: #e6f2ec;
+  }
+}
