@@ -1,21 +1,35 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { MacroCopilotCard } from "../components/MacroCopilotCard";
 import { AppShell } from "../components/AppShell";
 import { ApiError } from "../api/http";
 import { foodApi } from "../api/foodApi";
 import { nutritionApi } from "../api/nutritionApi";
+import { profileApi } from "../api/profileApi";
+import { ProfileForm } from "../components/ProfileForm";
+import { WaterCard } from "../components/WaterCard";
+import ProgressSummaryCard from "../components/ProgressSummaryCard";
 import { useAuth } from "../auth/useAuth";
 import { useFoodLogChanged } from "../lib/foodEvents";
 import { useI18n } from "../i18n/useI18n";
 import { MEAL_ORDER, localDateIso } from "../lib/foodLog";
+import { MEAL_SHARE, bmi, bmiCategory, weeklyPaceKg, type BmiCategory } from "../lib/profile";
 import type { DayLog, FoodLogEntry, MealType } from "../types/food";
 import type { TargetsResponse } from "../types/nutrition";
+import type { ProfileResponse } from "../types/profile";
 
 type State =
   | { status: "loading" }
   | { status: "noProfile" }
   | { status: "error"; message?: string }
-  | { status: "ready"; targets: TargetsResponse; day: DayLog | null };
+  | { status: "ready"; targets: TargetsResponse; day: DayLog | null; profile: ProfileResponse | null };
+
+const BMI_TONE: Record<BmiCategory, string> = {
+  under: "bg-amber-50 text-amber-800",
+  normal: "bg-emerald-50 text-emerald-800",
+  over: "bg-amber-50 text-amber-800",
+  obese: "bg-red-50 text-red-700",
+};
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -24,12 +38,17 @@ export default function DashboardPage() {
   const [hour] = useState(() => new Date().getHours());
   const [today] = useState(() => new Date());
   const [reloadKey, setReloadKey] = useState(0);
+  const [editing, setEditing] = useState(false);
   useFoodLogChanged(() => setReloadKey((current) => current + 1));
 
   useEffect(() => {
     let cancelled = false;
-    Promise.allSettled([nutritionApi.getTargets(), foodApi.getDay(localDateIso(new Date()))]).then(
-      ([targetsResult, dayResult]) => {
+    Promise.allSettled([
+      nutritionApi.getTargets(),
+      foodApi.getDay(localDateIso(new Date())),
+      profileApi.get(),
+    ]).then(
+      ([targetsResult, dayResult, profileResult]) => {
         if (cancelled) return;
         if (targetsResult.status === "rejected") {
           const error = targetsResult.reason;
@@ -44,6 +63,7 @@ export default function DashboardPage() {
           status: "ready",
           targets: targetsResult.value,
           day: dayResult.status === "fulfilled" ? dayResult.value : null,
+          profile: profileResult.status === "fulfilled" ? profileResult.value : null,
         });
       },
     );
@@ -68,13 +88,9 @@ export default function DashboardPage() {
       }
       topStat={topStat}
       actions={
-        <>
-          <SoonButton label={t.dashboard.summary} />
-          <SoonButton label={t.dashboard.generatePlan} />
-          <Link to="/food-tracking" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
-            {t.dashboard.logFood}
-          </Link>
-        </>
+        <Link to="/food-tracking" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+          {t.dashboard.logFood}
+        </Link>
       }
     >
       {state.status === "loading" && <p className="text-sm text-slate-600">{t.common.loading}</p>}
@@ -86,18 +102,89 @@ export default function DashboardPage() {
       )}
 
       {state.status === "noProfile" && (
-        <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70">
-          <p className="font-medium">{t.dashboard.noProfile}</p>
-          <p className="mt-1 text-sm text-slate-600">{t.dashboard.profileComingSoon}</p>
-        </section>
+        <ProfileForm onSaved={() => setReloadKey((current) => current + 1)} />
+      )}
+
+      {state.status === "ready" && state.profile && editing && (
+        <ProfileForm
+          initial={state.profile}
+          onCancel={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setReloadKey((current) => current + 1);
+          }}
+        />
+      )}
+
+      {state.status === "ready" && state.profile && !editing && (
+        <WeightStrip profile={state.profile} targets={state.targets} onEdit={() => setEditing(true)} />
       )}
 
       {state.status === "ready" && (
-        <ReadyView targets={state.targets} day={state.day} today={today} />
+        <>
+          <ReadyView targets={state.targets} day={state.day} today={today} />
+          <div className="mt-4">
+            <ProgressSummaryCard />
+          </div>
+        </>
       )}
 
       <p className="text-xs text-slate-500">{t.common.estimateNote}</p>
     </AppShell>
+  );
+}
+
+/** Weight management strip: BMI, expected pace, the edit button, and safety notes from the calorie targets. */
+function WeightStrip({ profile, targets, onEdit }: { profile: ProfileResponse; targets: TargetsResponse; onEdit: () => void }) {
+  const { t } = useI18n();
+  const p = t.program;
+  const value = bmi(profile.heightCm, profile.weightKg);
+  const category = bmiCategory(value);
+  const pace = weeklyPaceKg(targets.tdee, targets.calories);
+  const paceText =
+    pace < 0 ? p.paceLoss.replace("{kg}", String(Math.abs(pace))) : pace > 0 ? p.paceGain.replace("{kg}", String(pace)) : p.paceStable;
+  const bmiLabel = { under: p.bmiUnder, normal: p.bmiNormal, over: p.bmiOver, obese: p.bmiObese }[category];
+  const showLowBmiWarning = category === "under" && profile.goal === "LOSE_WEIGHT";
+
+  return (
+    <section className="space-y-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.dashboard.weightManagement}</p>
+        <span className="flex items-center gap-2">
+          <span className="text-slate-500">{p.bmi}</span>
+          <span className="font-bold">{value}</span>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${BMI_TONE[category]}`}>{bmiLabel}</span>
+        </span>
+        <p className="text-slate-600">{paceText}</p>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
+          >
+            {t.profileSetup.edit}
+          </button>
+          <Link
+            to="/summary"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+          >
+            {t.dashboard.summary}
+          </Link>
+          <Link
+            to="/generate-plan"
+            className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+          >
+            {t.dashboard.generatePlan}
+          </Link>
+        </div>
+      </div>
+      {(targets.minimumCaloriesApplied || showLowBmiWarning) && (
+        <div className="space-y-2 rounded-xl bg-amber-50 p-4 text-sm text-amber-950">
+          {targets.minimumCaloriesApplied && <p>{p.warnMinimum}</p>}
+          {showLowBmiWarning && <p>{p.warnLowBmi}</p>}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -154,46 +241,40 @@ function ReadyView({ targets, day, today }: { targets: TargetsResponse; day: Day
           </div>
         </section>
 
-        <div className="grid gap-4 sm:grid-cols-3 lg:col-span-2">
-          <MacroCard label={t.dashboard.protein} consumed={totals.proteinGrams} target={targets.proteinGrams} color="bg-rose-500" leftText={t.dashboard.leftForGoal} reachedText={t.dashboard.goalReached} />
-          <MacroCard label={t.dashboard.carbs} consumed={totals.carbsGrams} target={targets.carbsGrams} color="bg-amber-500" leftText={t.dashboard.leftForGoal} reachedText={t.dashboard.goalReached} />
-          <MacroCard label={t.dashboard.fat} consumed={totals.fatGrams} target={targets.fatGrams} color="bg-emerald-600" leftText={t.dashboard.leftForGoal} reachedText={t.dashboard.goalReached} />
+        <div className="space-y-4 lg:col-span-2">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <MacroCard label={t.dashboard.protein} consumed={totals.proteinGrams} target={targets.proteinGrams} color="bg-rose-500" leftText={t.dashboard.leftForGoal} reachedText={t.dashboard.goalReached} />
+            <MacroCard label={t.dashboard.carbs} consumed={totals.carbsGrams} target={targets.carbsGrams} color="bg-amber-500" leftText={t.dashboard.leftForGoal} reachedText={t.dashboard.goalReached} />
+            <MacroCard label={t.dashboard.fat} consumed={totals.fatGrams} target={targets.fatGrams} color="bg-emerald-600" leftText={t.dashboard.leftForGoal} reachedText={t.dashboard.goalReached} />
 
-          <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:col-span-2">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="font-semibold">{t.dashboard.fiber}</p>
-                <p className="text-xs text-slate-500">{t.dashboard.fiberNote}</p>
+            <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:col-span-2">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.dashboard.micronutrientLabel}</p>
+                  <p className="mt-1 font-semibold">{t.dashboard.fiber}</p>
+                  <p className="text-xs text-slate-500">{t.dashboard.fiberNote}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold">
+                    {totals.fiberGrams} <span className="text-sm font-medium text-slate-500">/ {targets.fiberGrams} g</span>
+                  </p>
+                  <p className="text-xs font-semibold text-emerald-700">
+                    {Math.min(100, Math.round((totals.fiberGrams / targets.fiberGrams) * 100))}% {t.dashboard.achieved}
+                  </p>
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold">
-                  {totals.fiberGrams} <span className="text-sm font-medium text-slate-500">/ {targets.fiberGrams} g</span>
-                </p>
-                <p className="text-xs font-semibold text-emerald-700">
-                  {Math.min(100, Math.round((totals.fiberGrams / targets.fiberGrams) * 100))}% {t.dashboard.achieved}
-                </p>
-              </div>
-            </div>
-          </section>
+            </section>
 
-          <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
-            <p className="font-semibold">{t.dashboard.hydration}</p>
-            <p className="mt-2 text-2xl font-bold">
-              {targets.waterLiters.toFixed(1)} <span className="text-sm font-medium text-slate-500">L</span>
-            </p>
-            <p className="mt-1 text-xs text-slate-500">{t.dashboard.hydrationNote}</p>
-            <span className="mt-3 inline-block rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-400">
-              +250 ml · {t.common.comingSoon}
-            </span>
-          </section>
+            <WaterCard date={localDateIso(today)} goalLiters={targets.waterLiters} />
+          </div>
+
+          <MealChart entries={entries} targets={targets} />
         </div>
       </div>
 
-      <CopilotPlaceholder />
-
-      <MealChart entries={entries} targetCalories={targets.calories} />
-
       <MealsSchedule entries={entries} />
+
+      <MacroCopilotCard />
     </>
   );
 }
@@ -259,7 +340,7 @@ function MacroCard({
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-slate-600">{label}</p>
-        <span className="text-xs font-semibold text-slate-500">{percent}%</span>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">{percent}%</span>
       </div>
       <p className="mt-2 text-2xl font-bold">
         {consumed} <span className="text-sm font-medium text-slate-500">/ {target} g</span>
@@ -274,51 +355,50 @@ function MacroCard({
   );
 }
 
-function CopilotPlaceholder() {
-  const { t } = useI18n();
-  return (
-    <section className="flex flex-col gap-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-sky-50 p-6 ring-1 ring-slate-200/70 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <div className="flex items-center gap-2">
-          <p className="font-semibold">{t.dashboard.copilotTitle}</p>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-500">
-            {t.common.comingSoon}
-          </span>
-        </div>
-        <p className="mt-1 text-sm text-slate-600">{t.dashboard.copilotText}</p>
-      </div>
-      <span className="self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-400 sm:self-auto">
-        {t.dashboard.askAi}
-      </span>
-    </section>
-  );
-}
-
-function MealChart({ entries, targetCalories }: { entries: FoodLogEntry[]; targetCalories: number }) {
+/** Calories per meal next to each meal's suggested share of the daily target (dashed line). */
+function MealChart({ entries, targets }: { entries: FoodLogEntry[]; targets: TargetsResponse }) {
   const { t } = useI18n();
   const perMeal = MEAL_ORDER.map((mealType) => ({
     mealType,
     kcal: entries.filter((entry) => entry.mealType === mealType).reduce((sum, entry) => sum + entry.calories, 0),
+    target: Math.round(targets.calories * MEAL_SHARE[mealType]),
   }));
-  const scale = Math.max(targetCalories, ...perMeal.map((meal) => meal.kcal), 1);
+  const scale = Math.max(1, ...perMeal.map((meal) => Math.max(meal.kcal, meal.target)));
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="font-semibold">{t.dashboard.chartTitle}</h2>
-          <p className="text-xs text-slate-500">{t.dashboard.chartSubtitle}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.dashboard.chronologyLabel}</p>
+          <h2 className="mt-1 font-semibold">{t.dashboard.chartTitle}</h2>
         </div>
-        <p className="text-xs text-slate-500">{t.dashboard.dailyTarget.replace("{target}", targetCalories.toLocaleString())}</p>
+        <ul className="flex flex-wrap gap-4 text-xs text-slate-500">
+          <li className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-emerald-700" aria-hidden="true" />
+            {t.dashboard.legendLogged}
+          </li>
+          <li className="flex items-center gap-1.5">
+            <span className="w-4 border-t-2 border-dashed border-amber-500" aria-hidden="true" />
+            {t.dashboard.legendTarget}
+          </li>
+        </ul>
       </div>
-      <div className="mt-6 flex h-48 items-end justify-around gap-4 border-b border-slate-200 pb-2">
+      <div className="mt-6 flex h-52 items-stretch justify-around gap-4 border-b border-slate-200 pb-2">
         {perMeal.map((meal) => (
-          <div key={meal.mealType} className="flex h-full w-full max-w-24 flex-col items-center justify-end gap-2">
-            <span className="text-xs font-semibold text-slate-600">{meal.kcal > 0 ? meal.kcal.toLocaleString() : ""}</span>
-            <div
-              className={`w-full rounded-t-lg ${meal.kcal > 0 ? "bg-emerald-700" : "bg-slate-100"}`}
-              style={{ height: `${Math.max(2, (meal.kcal / scale) * 100)}%` }}
-            />
+          <div key={meal.mealType} className="flex h-full w-full max-w-24 flex-col items-center gap-2">
+            <span className="h-4 text-xs font-semibold text-slate-600">{meal.kcal > 0 ? meal.kcal.toLocaleString() : ""}</span>
+            <div className="relative flex w-full flex-1 items-end">
+              <div
+                className={`w-full rounded-t-lg ${meal.kcal > 0 ? "bg-emerald-700" : "bg-slate-100"}`}
+                style={{ height: `${Math.max(2, (meal.kcal / scale) * 100)}%` }}
+              />
+              <div
+                className="pointer-events-none absolute inset-x-0 border-t-2 border-dashed border-amber-500"
+                style={{ bottom: `${(meal.target / scale) * 100}%` }}
+                title={t.dashboard.dailyTarget.replace("{target}", meal.target.toLocaleString())}
+                aria-hidden="true"
+              />
+            </div>
             <span className="text-xs text-slate-500">{t.food.meals[meal.mealType]}</span>
           </div>
         ))}
@@ -332,15 +412,15 @@ function MealsSchedule({ entries }: { entries: FoodLogEntry[] }) {
   const recorded = MEAL_ORDER.filter((mealType) => entries.some((entry) => entry.mealType === mealType)).length;
 
   return (
-    <section>
+    <section className="mt-4">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 className="font-semibold">{t.dashboard.mealsTitle}</h2>
-          <p className="text-xs text-slate-500">{t.dashboard.mealsSubtitle}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.dashboard.journalLabel}</p>
+          <h2 className="mt-1 font-semibold">{t.dashboard.mealsTitle}</h2>
         </div>
         <p className="text-xs font-semibold text-slate-600">{t.dashboard.recordedCount.replace("{done}", String(recorded))}</p>
       </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {MEAL_ORDER.map((mealType) => (
           <MealCard key={mealType} mealType={mealType} entries={entries.filter((entry) => entry.mealType === mealType)} />
         ))}
@@ -384,9 +464,9 @@ function MealCard({ mealType, entries }: { mealType: MealType; entries: FoodLogE
           </div>
         </>
       ) : (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-3 flex flex-col items-start gap-3">
           <p className="text-sm text-slate-500">{t.food.emptyMeal}</p>
-          <Link to="/food-tracking" className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800">
+          <Link to="/food-tracking" className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50">
             {t.common.logMeal}
           </Link>
         </div>
@@ -395,12 +475,3 @@ function MealCard({ mealType, entries }: { mealType: MealType; entries: FoodLogE
   );
 }
 
-function SoonButton({ label }: { label: string }): ReactNode {
-  const { t } = useI18n();
-  return (
-    <button type="button" disabled className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-400">
-      {label}
-      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase">{t.common.comingSoon}</span>
-    </button>
-  );
-}

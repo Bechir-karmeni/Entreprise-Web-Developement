@@ -12,13 +12,35 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
 
 server:
   port: 8080
 
 app:
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
   security:
     jwt-secret: ${JWT_SECRET}
     jwt-expiration-ms: ${JWT_EXPIRATION:900000}
     refresh-token-secret: ${REFRESH_TOKEN_SECRET}
     refresh-token-expiration-ms: ${REFRESH_TOKEN_EXPIRATION:1209600000}
+  google:
+    # Client ID from Google Cloud Console (OAuth client, type Web). Empty = Google sign-in is off.
+    client-id: ${GOOGLE_CLIENT_ID:}
+  mail:
+    # smtp = send real emails; log = write the code to the backend console (development only)
+    mode: ${MAIL_MODE:smtp}
+    from: ${MAIL_FROM:${MAIL_USERNAME:}}
+  ai:
+    gemini:
+      # The key is read from the environment only. Without it, the AI features report that they are not set up.
+      api-key: ${GEMINI_API_KEY:}
+      model: ${GEMINI_MODEL:gemini-2.5-flash}
+      base-url: https://generativelanguage.googleapis.com

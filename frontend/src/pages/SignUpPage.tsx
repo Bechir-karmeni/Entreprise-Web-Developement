@@ -58,8 +58,8 @@ export default function SignUpPage() {
 
     setSubmitting(true);
     try {
-      await register(values);
-      navigate("/dashboard", { replace: true });
+      const pending = await register(values);
+      navigate(`/verify-email?email=${encodeURIComponent(pending.email)}`, { replace: true });
     } catch (error) {
       if (error instanceof ApiError) {
         // Show per-field messages from the backend when present (for example, a taken email).

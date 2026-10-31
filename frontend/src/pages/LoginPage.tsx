@@ -34,6 +34,11 @@ export default function LoginPage() {
       await login(values);
       navigate(from, { replace: true });
     } catch (error) {
+      // 403 means the password was right but the email is not confirmed yet: send the user to the code screen.
+      if (error instanceof ApiError && error.status === 403) {
+        navigate(`/verify-email?email=${encodeURIComponent(values.email.trim())}`, { replace: true });
+        return;
+      }
       setFormError(error instanceof ApiError ? error.message : "Could not sign in. Please try again.");
     } finally {
       setSubmitting(false);
@@ -71,9 +76,9 @@ export default function LoginPage() {
               autoComplete="current-password"
               placeholder="Enter your password"
               hint={
-                <a href="#" className="text-xs font-semibold text-emerald-700 hover:underline">
+                <Link to="/forgot-password" className="text-xs font-semibold text-emerald-700 hover:underline">
                   Forgot password?
-                </a>
+                </Link>
               }
               value={values.password}
               error={errors.password}
@@ -185,12 +190,6 @@ function LoginPanel() {
         </div>
       </div>
 
-      <figure className="mt-5 rounded-xl bg-white/10 p-5 text-sm">
-        <blockquote className="italic text-emerald-50">
-          "Daily Tracker helped me hit my protein targets effortlessly while taking the guesswork out of grocery shopping."
-        </blockquote>
-        <figcaption className="mt-3 text-xs font-semibold text-emerald-100">— Alex R., Marathon Runner &amp; Nutritionist</figcaption>
-      </figure>
 
       <div className="mt-6 flex items-center gap-3">
         <div className="flex -space-x-2">

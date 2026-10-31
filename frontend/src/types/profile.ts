@@ -7,8 +7,19 @@ export type NutritionGoal =
 
 export type ActivityLevel = "SEDENTARY" | "LIGHTLY_ACTIVE" | "MODERATELY_ACTIVE" | "VERY_ACTIVE" | "EXTRA_ACTIVE";
 
+export type Sex = "MALE" | "FEMALE";
+
 export interface ProfileResponse {
-  sex: string;
+  sex: Sex;
+  dateOfBirth: string;
+  heightCm: number;
+  weightKg: number;
+  activityLevel: ActivityLevel;
+  goal: NutritionGoal;
+}
+
+export interface ProfileInput {
+  sex: Sex;
   dateOfBirth: string;
   heightCm: number;
   weightKg: number;

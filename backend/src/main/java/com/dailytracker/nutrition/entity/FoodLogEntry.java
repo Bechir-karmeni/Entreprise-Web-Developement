@@ -1,6 +1,7 @@
 package com.dailytracker.nutrition.entity;
 
 import com.dailytracker.nutrition.food.MealType;
+import com.dailytracker.nutrition.food.MicronutrientJson;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -11,6 +12,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -58,6 +60,10 @@ public class FoodLogEntry {
     @Column(nullable = false)
     private double fiber;
 
+    /** Vitamin and mineral amounts for the portion eaten, as JSON text. NULL when the food had no such data. */
+    @Column(name = "micronutrients", length = 2000)
+    private String micronutrientsJson;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -68,6 +74,14 @@ public class FoodLogEntry {
     public FoodLogEntry(UUID userId, LocalDate logDate, MealType mealType, UUID foodId, String foodName,
                         double amount, String servingUnit, int calories, double protein, double carbs,
                         double fat, double fiber) {
+        this(userId, logDate, mealType, foodId, foodName, amount, servingUnit, calories, protein, carbs,
+                fat, fiber, null);
+    }
+
+    /** Pass null for micronutrients when the food or the entry has no vitamin and mineral data. */
+    public FoodLogEntry(UUID userId, LocalDate logDate, MealType mealType, UUID foodId, String foodName,
+                        double amount, String servingUnit, int calories, double protein, double carbs,
+                        double fat, double fiber, Map<String, Double> micronutrients) {
         this.id = UUID.randomUUID();
         this.userId = userId;
         this.logDate = logDate;
@@ -81,6 +95,26 @@ public class FoodLogEntry {
         this.carbs = carbs;
         this.fat = fat;
         this.fiber = fiber;
+        this.micronutrientsJson = MicronutrientJson.write(micronutrients);
+    }
+
+    /**
+     * Changes the amount eaten and scales the calories, macros and vitamins and minerals by the same ratio.
+     * The entry keeps its food and meal; only the portion changes.
+     */
+    public void rescale(double newAmount) {
+        double factor = newAmount / this.amount;
+        this.calories = (int) Math.round(this.calories * factor);
+        this.protein = roundOneDecimal(this.protein * factor);
+        this.carbs = roundOneDecimal(this.carbs * factor);
+        this.fat = roundOneDecimal(this.fat * factor);
+        this.fiber = roundOneDecimal(this.fiber * factor);
+        this.micronutrientsJson = MicronutrientJson.write(MicronutrientJson.scale(getMicronutrients(), factor));
+        this.amount = newAmount;
+    }
+
+    private static double roundOneDecimal(double value) {
+        return Math.round(value * 10.0) / 10.0;
     }
 
     @PrePersist
@@ -101,5 +135,6 @@ public class FoodLogEntry {
     public double getCarbs() { return carbs; }
     public double getFat() { return fat; }
     public double getFiber() { return fiber; }
+    public Map<String, Double> getMicronutrients() { return MicronutrientJson.read(micronutrientsJson); }
     public Instant getCreatedAt() { return createdAt; }
 }

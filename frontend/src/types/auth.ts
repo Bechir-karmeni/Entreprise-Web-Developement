@@ -25,3 +25,22 @@ export interface LoginInput {
   email: string;
   password: string;
 }
+
+/** Returned after sign-up: the account exists but the email must be confirmed with the emailed code. */
+export interface PendingVerification {
+  email: string;
+  codeValidSeconds: number;
+  resendAfterSeconds: number;
+}
+
+export interface VerifyEmailInput {
+  email: string;
+  code: string;
+}
+
+export interface ResetPasswordInput {
+  email: string;
+  code: string;
+  password: string;
+  confirmPassword: string;
+}

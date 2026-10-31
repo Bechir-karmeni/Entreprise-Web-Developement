@@ -102,7 +102,7 @@ export function QuickEntryPanel({ meal, onClose }: { meal: MealType; onClose: ()
           maxLength={150}
           onChange={(event) => setName(event.target.value)}
           placeholder={t.quickEntry.namePlaceholder}
-          className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-600 focus:outline-none"
+          className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-600 focus:outline-none bg-white text-slate-900 [color-scheme:light]"
         />
 
         <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">

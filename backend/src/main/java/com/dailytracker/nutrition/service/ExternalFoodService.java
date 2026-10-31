@@ -4,6 +4,7 @@ import com.dailytracker.nutrition.dto.FoodResponse;
 import com.dailytracker.nutrition.exception.ExternalServiceUnavailableException;
 import com.dailytracker.nutrition.exception.InvalidRequestException;
 import com.dailytracker.nutrition.exception.RateLimitedException;
+import com.dailytracker.nutrition.exception.ResourceNotFoundException;
 import com.dailytracker.nutrition.external.ExternalFood;
 import com.dailytracker.nutrition.external.ExternalFoodException;
 import com.dailytracker.nutrition.external.OpenFoodFactsClient;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Searches the online food sources, saves the results, and caches each search for a few minutes.
@@ -33,6 +35,7 @@ public class ExternalFoodService {
     static final int RESULTS_PER_SOURCE = 10;
     static final Duration MIN_INTERVAL_BETWEEN_CALLS = Duration.ofSeconds(6);
     static final Duration CACHE_TIME = Duration.ofMinutes(10);
+    static final Pattern BARCODE = Pattern.compile("\\d{6,14}");
 
     private static final Logger log = LoggerFactory.getLogger(ExternalFoodService.class);
 
@@ -95,6 +98,28 @@ public class ExternalFoodService {
         List<FoodResponse> result = importer.upsert(fetched);
         cache.put(key, new CachedSearch(now, result));
         return result;
+    }
+
+    /**
+     * Looks up one product by its barcode in Open Food Facts, saves it, and returns it. Barcodes are 6 to 14 digits;
+     * spaces are ignored. Shares the same throttle as the search.
+     */
+    public FoodResponse lookupBarcode(String code) {
+        String digits = code == null ? "" : code.replaceAll("\\s", "");
+        if (!BARCODE.matcher(digits).matches()) {
+            throw new InvalidRequestException("A barcode has 6 to 14 digits.");
+        }
+
+        reserveExternalCall(clock.instant());
+        ExternalFood product;
+        try {
+            product = openFoodFacts.lookup(digits)
+                    .orElseThrow(() -> new ResourceNotFoundException("No product with this barcode was found."));
+        } catch (ExternalFoodException e) {
+            log.warn("Open Food Facts barcode lookup failed: {}", e.getMessage());
+            throw new ExternalServiceUnavailableException("The product database is not available right now.");
+        }
+        return importer.upsert(List.of(product)).get(0);
     }
 
     private synchronized void reserveExternalCall(Instant now) {

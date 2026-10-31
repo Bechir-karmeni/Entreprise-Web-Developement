@@ -52,6 +52,19 @@ class NutritionTargetCalculatorTest {
     }
 
     @Test
+    void appliesTheHigherFloorForMen() {
+        // Male, 30 years, 175 cm, 60 kg, sedentary, lose weight.
+        // BMR = 10*60 + 6.25*175 - 5*30 + 5 = 1548.75; TDEE = 1858.5; 1858.5 - 500 = 1358.5, below the 1500 floor for men.
+        BodyProfile profile = new BodyProfile(Sex.MALE, LocalDate.of(1996, 10, 8), 175, 60,
+                ActivityLevel.SEDENTARY, NutritionGoal.LOSE_WEIGHT);
+
+        NutritionTargets targets = calculator.calculate(profile, TODAY);
+
+        assertEquals(1500, targets.calories());
+        assertTrue(targets.minimumCaloriesApplied());
+    }
+
+    @Test
     void rejectsImplausibleHeight() {
         BodyProfile profile = new BodyProfile(Sex.MALE, LocalDate.of(1996, 10, 8), 40, 80,
                 ActivityLevel.MODERATELY_ACTIVE, NutritionGoal.MAINTAIN_WEIGHT);
@@ -65,6 +78,6 @@ class NutritionTargetCalculatorTest {
                 NutritionSettings.defaults().activityFactors(),
                 java.util.Map.of(NutritionGoal.MAINTAIN_WEIGHT, 0),
                 NutritionSettings.defaults().proteinGramsPerKg(),
-                0.25, 14, 35, 1200));
+                0.25, 14, 35, java.util.Map.of(Sex.MALE, 1500, Sex.FEMALE, 1200)));
     }
 }

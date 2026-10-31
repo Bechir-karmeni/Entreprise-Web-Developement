@@ -36,6 +36,14 @@ public class ShoppingItem {
     @Column(nullable = false)
     private boolean checked;
 
+    /** Price in cents, entered by the user. Null when no price is known. */
+    @Column(name = "price_cents")
+    private Integer priceCents;
+
+    /** Barcode digits (EAN or UPC) when the item was added from a product. Null for hand-typed items. */
+    @Column(length = 14)
+    private String barcode;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -60,6 +68,22 @@ public class ShoppingItem {
     public void setChecked(boolean checked) {
         this.checked = checked;
     }
+
+    public void setCategory(ShoppingCategory category) {
+        this.category = category;
+    }
+
+    public void setPriceCents(Integer priceCents) {
+        this.priceCents = priceCents;
+    }
+
+    public Integer getPriceCents() { return priceCents; }
+
+    public void setBarcode(String barcode) {
+        this.barcode = barcode;
+    }
+
+    public String getBarcode() { return barcode; }
 
     public UUID getId() { return id; }
     public UUID getUserId() { return userId; }

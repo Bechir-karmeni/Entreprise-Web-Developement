@@ -2,6 +2,7 @@ package com.dailytracker.nutrition.external;
 
 import com.dailytracker.nutrition.food.Allergen;
 import com.dailytracker.nutrition.food.FoodCategory;
+import com.dailytracker.nutrition.food.Micronutrient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,8 @@ public class UsdaFoodClient {
     private static final int FAT = 1004;
     private static final int CARBS = 1005;
     private static final int FIBER = 1079;
+    /** Salt is sodium x 2.5 (the usual conversion on nutrition labels). */
+    private static final double SODIUM_TO_SALT = 2.5;
 
     private final HttpClient http = ExternalHttp.client();
     private final ObjectMapper mapper;
@@ -91,8 +94,29 @@ public class UsdaFoodClient {
                     nutrients.getOrDefault(FAT, 0.0),
                     nutrients.getOrDefault(FIBER, 0.0),
                     EnumSet.noneOf(Allergen.class),
-                    false));
+                    false,
+                    micronutrients(nutrients)));
         }
         return foods;
+    }
+
+    /**
+     * Vitamin and mineral amounts per 100 g. A nutrient the USDA entry does not list is left out,
+     * so it is not mistaken for zero. Returns an empty map when none are listed.
+     */
+    static Map<String, Double> micronutrients(Map<Integer, Double> nutrients) {
+        Map<String, Double> values = new HashMap<>();
+        for (Micronutrient nutrient : Micronutrient.values()) {
+            Double value = nutrients.get(nutrient.usdaId());
+            if (value == null) {
+                continue;
+            }
+            if (nutrient == Micronutrient.SALT) {
+                // USDA gives sodium in mg; salt is sodium x 2.5, in g.
+                value = value * SODIUM_TO_SALT / 1000.0;
+            }
+            values.put(nutrient.name(), value);
+        }
+        return values;
     }
 }

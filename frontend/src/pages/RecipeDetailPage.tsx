@@ -21,6 +21,7 @@ export default function RecipeDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [portions, setPortions] = useState(1);
   const [tracking, setTracking] = useState(false);
+  const [shopping, setShopping] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   useEffect(() => {
@@ -51,6 +52,20 @@ export default function RecipeDetailPage() {
       setNotice({ tone: "error", text: error instanceof ApiError ? error.message : t.common.genericError });
     } finally {
       setTracking(false);
+    }
+  }
+
+  async function addToShopping(foodIds?: string[]) {
+    if (!recipe) return;
+    setShopping(true);
+    setNotice(null);
+    try {
+      const added = await recipeApi.addToShopping(recipe.id, { portions, foodIds });
+      setNotice({ tone: "ok", text: t.recipeDetail.addedToShopping.replace("{count}", String(added.length)) });
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof ApiError ? error.message : t.common.genericError });
+    } finally {
+      setShopping(false);
     }
   }
 
@@ -204,14 +219,33 @@ export default function RecipeDetailPage() {
               </div>
               <ul className="mt-3 divide-y divide-slate-100 text-sm">
                 {recipe.ingredients.map((item, index) => (
-                  <li key={`${item.foodId}-${index}`} className="flex justify-between gap-3 py-2">
+                  <li key={`${item.foodId}-${index}`} className="flex items-center justify-between gap-3 py-2">
                     <span>{item.foodName}</span>
-                    <span className="whitespace-nowrap text-slate-500">
-                      {t.recipes.grams.replace("{grams}", String(Math.round((item.grams / recipe.servings) * portions)))}
+                    <span className="flex items-center gap-3">
+                      <span className="whitespace-nowrap text-slate-500">
+                        {t.recipes.grams.replace("{grams}", String(Math.round((item.grams / recipe.servings) * portions)))}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`${t.recipeDetail.addOneToShopping}: ${item.foodName}`}
+                        disabled={shopping}
+                        onClick={() => addToShopping([item.foodId])}
+                        className="rounded-full border border-emerald-700 px-2.5 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                      >
+                        + {t.recipeDetail.addOneToShopping}
+                      </button>
                     </span>
                   </li>
                 ))}
               </ul>
+              <button
+                type="button"
+                onClick={() => addToShopping()}
+                disabled={shopping}
+                className="mt-3 w-full rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {t.recipeDetail.addAllToShopping}
+              </button>
               <p className="mt-2 text-xs text-slate-500">
                 {t.recipeDetail.totalKcal.replace("{kcal}", String(recipe.perServing.calories * portions))}
               </p>

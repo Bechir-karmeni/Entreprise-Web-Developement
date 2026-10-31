@@ -11,6 +11,8 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -58,6 +60,12 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, "Validation failed.", errors);
     }
 
+    /** A path value of the wrong type, such as a non-UUID id, is a bad request, not a server error. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleBadPathValue(MethodArgumentTypeMismatchException ex) {
+        return build(HttpStatus.BAD_REQUEST, "Invalid value for '" + ex.getName() + "'.", null);
+    }
+
     @ExceptionHandler(InvalidTokenException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidToken(InvalidTokenException ex) {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), null);
@@ -69,9 +77,24 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.UNAUTHORIZED, "Invalid email or password.", null);
     }
 
+    @ExceptionHandler(EmailNotVerifiedException.class)
+    public ResponseEntity<ApiErrorResponse> handleEmailNotVerified(EmailNotVerifiedException ex) {
+        return build(HttpStatus.FORBIDDEN, ex.getMessage(), null);
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiErrorResponse> handleAccessDenied(AccessDeniedException ex) {
         return build(HttpStatus.FORBIDDEN, "Access denied.", null);
+    }
+
+    /**
+     * A route that does not exist in this build of the backend. This usually means the server was started
+     * from an older build, so it is reported as 404 with a clear message instead of a generic 500.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleNoRoute(NoResourceFoundException ex) {
+        log.warn("No route for {} - rebuild and restart the backend if this endpoint is new.", ex.getResourcePath());
+        return build(HttpStatus.NOT_FOUND, "This endpoint does not exist on the running server. Rebuild and restart the backend.", null);
     }
 
     @ExceptionHandler(Exception.class)

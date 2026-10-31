@@ -12,6 +12,8 @@ public interface FoodLogRepository extends JpaRepository<FoodLogEntry, UUID> {
 
     List<FoodLogEntry> findByUserIdAndLogDateOrderByCreatedAtAsc(UUID userId, LocalDate logDate);
 
+    List<FoodLogEntry> findByUserIdAndLogDateBetweenOrderByLogDateAsc(UUID userId, LocalDate from, LocalDate to);
+
     /** Only returns the entry if it belongs to this user, so users cannot delete each other's entries. */
     Optional<FoodLogEntry> findByIdAndUserId(UUID id, UUID userId);
 }

@@ -68,6 +68,8 @@ export interface FoodLogEntry {
   carbsGrams: number;
   fatGrams: number;
   fiberGrams: number;
+  /** When the food was logged (ISO time), not when it was eaten. */
+  loggedAt: string;
 }
 
 export interface DayLog {

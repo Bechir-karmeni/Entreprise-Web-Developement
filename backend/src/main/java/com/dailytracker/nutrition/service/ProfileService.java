@@ -4,6 +4,7 @@ import com.dailytracker.nutrition.dto.ProfileRequest;
 import com.dailytracker.nutrition.dto.ProfileResponse;
 import com.dailytracker.nutrition.dto.TargetsResponse;
 import com.dailytracker.nutrition.entity.UserProfile;
+import com.dailytracker.nutrition.exception.InvalidRequestException;
 import com.dailytracker.nutrition.exception.ResourceNotFoundException;
 import com.dailytracker.nutrition.nutrition.BodyProfile;
 import com.dailytracker.nutrition.nutrition.NutritionTargetCalculator;
@@ -14,10 +15,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.Period;
 import java.util.UUID;
 
 @Service
 public class ProfileService {
+
+    static final int MIN_AGE = 18;
 
     private final UserProfileRepository profiles;
     private final NutritionTargetCalculator calculator;
@@ -32,6 +36,11 @@ public class ProfileService {
     /** Creates the profile on first save and updates it afterwards. */
     @Transactional
     public ProfileResponse save(UUID userId, ProfileRequest request) {
+        // The formulas and the calorie limits are for adults only. Minors need a doctor's or dietitian's plan.
+        int age = Period.between(request.dateOfBirth(), LocalDate.now(clock)).getYears();
+        if (age < MIN_AGE) {
+            throw new InvalidRequestException("The program is for adults aged 18 and over.");
+        }
         UserProfile profile = profiles.findById(userId).orElseGet(() -> new UserProfile(userId));
         profile.update(
                 request.sex(),

@@ -2,12 +2,18 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "../components/AppShell";
 import { ApiError } from "../api/http";
+import { profileApi } from "../api/profileApi";
 import { recipeApi } from "../api/recipeApi";
+import OnlineRecipesSection from "../components/OnlineRecipesSection";
+import PromptRecommendations from "../components/PromptRecommendations";
+import FridgeCard from "../components/FridgeCard";
+import PantryScanner from "../components/PantryScanner";
+import { fitsGoal, type Goal } from "../lib/recipeFit";
 import { logRecipePortions } from "../lib/recipeTracking";
 import { useI18n } from "../i18n/useI18n";
 import type { Recipe } from "../types/recipe";
 
-type Filter = "ALL" | "HIGH_PROTEIN" | "QUICK" | "VEGETARIAN";
+type Filter = "ALL" | "HIGH_PROTEIN" | "QUICK" | "VEGETARIAN" | "ALLERGEN_FREE" | "PERSONALISED";
 
 interface Notice {
   tone: "ok" | "error";
@@ -18,7 +24,7 @@ function errorText(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-function matchesFilter(recipe: Recipe, filter: Filter): boolean {
+function matchesFilter(recipe: Recipe, filter: Filter, goal: Goal | null): boolean {
   switch (filter) {
     case "HIGH_PROTEIN":
       return recipe.tags.includes("HIGH_PROTEIN");
@@ -26,6 +32,11 @@ function matchesFilter(recipe: Recipe, filter: Filter): boolean {
       return recipe.tags.includes("VEGETARIAN");
     case "QUICK":
       return recipe.prepMinutes <= 21;
+    case "ALLERGEN_FREE":
+      // Only a recipe whose ingredients all have allergen data, and none of them lists an allergen.
+      return recipe.allergensKnown && recipe.allergens.length === 0;
+    case "PERSONALISED":
+      return goal !== null && fitsGoal(recipe, goal);
     default:
       return true;
   }
@@ -38,12 +49,18 @@ export default function RecipesPage() {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [trackingId, setTrackingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // The profile goal drives the "Personalised" filter. Null when there is no profile.
+  const [goal, setGoal] = useState<Goal | null>(null);
 
   useEffect(() => {
     recipeApi
       .list()
       .then(setRecipes)
       .catch((error: unknown) => setLoadError(errorText(error, t.common.genericError)));
+    profileApi
+      .get()
+      .then((profile) => setGoal(profile.goal))
+      .catch(() => setGoal(null));
   }, [t.common.genericError]);
 
   async function trackOnePortion(recipe: Recipe) {
@@ -64,20 +81,16 @@ export default function RecipesPage() {
     { key: "HIGH_PROTEIN", label: t.recipes.filterHighProtein },
     { key: "QUICK", label: t.recipes.filterQuick },
     { key: "VEGETARIAN", label: t.recipes.filterVegetarian },
+    { key: "PERSONALISED", label: t.recipes.filterPersonalised },
+    { key: "ALLERGEN_FREE", label: t.recipes.filterAllergenFree },
   ];
 
   const list = recipes ?? [];
-  const visible = list.filter((recipe) => matchesFilter(recipe, filter));
+  const visible = list.filter((recipe) => matchesFilter(recipe, filter, goal));
 
   return (
     <AppShell title={t.recipes.title} subtitle={t.recipes.subtitle}>
-      <section className="mb-4 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-semibold">{t.recipes.scannerTitle}</h2>
-          <SoonBadge />
-        </div>
-        <p className="mt-2 text-sm text-slate-500">{t.recipes.scannerText}</p>
-      </section>
+      <PantryScanner />
 
       <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label={t.recipes.filterLabel}>
         {filters.map((option) => {
@@ -96,8 +109,6 @@ export default function RecipesPage() {
             </button>
           );
         })}
-        <SoonChip label={t.recipes.filterPersonalised} />
-        <SoonChip label={t.recipes.filterAllergenFree} />
       </div>
 
       {notice && (
@@ -122,7 +133,9 @@ export default function RecipesPage() {
       {recipes !== null && (
         <>
           {visible.length === 0 ? (
-            <p className="rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm ring-1 ring-slate-200/70">{t.recipes.empty}</p>
+            <p className="rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm ring-1 ring-slate-200/70">
+              {filter === "PERSONALISED" && goal === null ? t.recipes.personalisedNoProfile : t.recipes.empty}
+            </p>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {visible.map((recipe) => (
@@ -137,11 +150,17 @@ export default function RecipesPage() {
           )}
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <SoonCard title={t.recipes.collectionsTitle} text={t.recipes.collectionsText} />
-            <PromptCard />
+            <CollectionsCard recipes={list} goal={goal} onSelect={setFilter} />
+            <PromptRecommendations />
+          </div>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <FridgeCard />
           </div>
         </>
       )}
+      <div className="mt-8">
+        <OnlineRecipesSection />
+      </div>
     </AppShell>
   );
 }
@@ -202,11 +221,6 @@ function RecipeCard({ recipe, busy, onTrack }: { recipe: Recipe; busy: boolean; 
   );
 }
 
-function SoonBadge() {
-  const { t } = useI18n();
-  return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-500">{t.common.comingSoon}</span>;
-}
-
 function SoonChip({ label }: { label: string }) {
   const { t } = useI18n();
   return (
@@ -217,27 +231,47 @@ function SoonChip({ label }: { label: string }) {
   );
 }
 
-function SoonCard({ title, text }: { title: string; text: string }) {
+/** Recipes grouped by time and tags. Showing a collection applies the same filter as the buttons above. */
+function CollectionsCard({
+  recipes,
+  goal,
+  onSelect,
+}: {
+  recipes: Recipe[];
+  goal: Goal | null;
+  onSelect: (filter: Filter) => void;
+}) {
+  const { t } = useI18n();
+  const collections: { key: Filter; label: string }[] = [
+    { key: "QUICK", label: t.recipes.filterQuick },
+    { key: "HIGH_PROTEIN", label: t.recipes.filterHighProtein },
+    { key: "VEGETARIAN", label: t.recipes.filterVegetarian },
+  ];
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-semibold">{title}</h2>
-        <SoonBadge />
-      </div>
-      <p className="mt-2 text-sm text-slate-500">{text}</p>
-    </section>
-  );
-}
-
-function PromptCard() {
-  const { t } = useI18n();
-  return (
-    <section className="rounded-2xl bg-emerald-900 p-5 text-white shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-semibold">{t.recipes.promptTitle}</h2>
-        <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium uppercase">{t.common.comingSoon}</span>
-      </div>
-      <p className="mt-2 text-sm text-emerald-100">{t.recipes.promptText}</p>
+      <h2 className="font-semibold">{t.recipes.collectionsTitle}</h2>
+      <p className="mt-1 text-xs text-slate-500">{t.recipes.collectionsText}</p>
+      <ul className="mt-4 divide-y divide-slate-100">
+        {collections.map((collection) => {
+          const count = recipes.filter((recipe) => matchesFilter(recipe, collection.key, goal)).length;
+          return (
+            <li key={collection.key} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <span className="font-medium text-slate-700">{collection.label}</span>
+              <span className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">{t.recipes.collectionCount.replace("{count}", String(count))}</span>
+                <button
+                  type="button"
+                  onClick={() => onSelect(collection.key)}
+                  disabled={count === 0}
+                  className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {t.recipes.collectionShow}
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

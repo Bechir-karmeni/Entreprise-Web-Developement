@@ -10,7 +10,11 @@ public record ShoppingItemResponse(
         String name,
         String quantity,
         ShoppingCategory category,
-        boolean checked
+        boolean checked,
+        /** Price in cents, or null when no price was entered. */
+        Integer priceCents,
+        /** Barcode digits, or null for hand-typed items. */
+        String barcode
 ) {
     public static ShoppingItemResponse from(ShoppingItem item) {
         return new ShoppingItemResponse(
@@ -18,6 +22,8 @@ public record ShoppingItemResponse(
                 item.getName(),
                 item.getQuantity(),
                 item.getCategory(),
-                item.isChecked());
+                item.isChecked(),
+                item.getPriceCents(),
+                item.getBarcode());
     }
 }

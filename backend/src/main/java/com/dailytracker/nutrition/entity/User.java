@@ -31,6 +31,9 @@ public class User {
     @Column(name = "password_hash", nullable = false, length = 100)
     private String passwordHash;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -61,7 +64,12 @@ public class User {
         this.updatedAt = Instant.now();
     }
 
+    public void markEmailVerified() { this.emailVerified = true; }
+
+    public void changePasswordHash(String newPasswordHash) { this.passwordHash = newPasswordHash; }
+
     public UUID getId() { return id; }
+    public boolean isEmailVerified() { return emailVerified; }
     public String getFirstName() { return firstName; }
     public String getLastName() { return lastName; }
     public String getEmail() { return email; }

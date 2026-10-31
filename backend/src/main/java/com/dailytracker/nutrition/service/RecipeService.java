@@ -7,12 +7,15 @@ import com.dailytracker.nutrition.entity.Food;
 import com.dailytracker.nutrition.entity.Recipe;
 import com.dailytracker.nutrition.entity.RecipeIngredient;
 import com.dailytracker.nutrition.exception.ResourceNotFoundException;
+import com.dailytracker.nutrition.food.Allergen;
 import com.dailytracker.nutrition.repository.RecipeRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -38,8 +41,15 @@ public class RecipeService {
 
     static RecipeResponse toResponse(Recipe recipe) {
         List<RecipeIngredientResponse> ingredients = recipe.getIngredients().stream()
-                .map(item -> new RecipeIngredientResponse(item.getFood().getId(), item.getFood().getName(), item.getGrams()))
+                .map(item -> new RecipeIngredientResponse(item.getFood().getId(), item.getFood().getName(), item.getGrams(),
+                        RecipeShoppingService.barcodeOf(item.getFood())))
                 .toList();
+        Set<Allergen> allergens = EnumSet.noneOf(Allergen.class);
+        boolean allergensKnown = true;
+        for (RecipeIngredient item : recipe.getIngredients()) {
+            allergens.addAll(item.getFood().getAllergens());
+            allergensKnown &= item.getFood().isAllergensKnown();
+        }
         return new RecipeResponse(
                 recipe.getId(),
                 recipe.getName(),
@@ -49,7 +59,9 @@ public class RecipeService {
                 splitTags(recipe.getTags()),
                 perServing(recipe.getIngredients(), recipe.getServings()),
                 Arrays.stream(recipe.getSteps().split("\n")).map(String::trim).filter(step -> !step.isEmpty()).toList(),
-                ingredients);
+                ingredients,
+                allergens.stream().sorted().toList(),
+                allergensKnown);
     }
 
     /** Nutrition of one serving: each food is scaled from its serving size to the grams used in the recipe. */

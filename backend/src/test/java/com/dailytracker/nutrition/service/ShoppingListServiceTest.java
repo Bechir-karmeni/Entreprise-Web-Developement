@@ -10,6 +10,7 @@ import com.dailytracker.nutrition.dto.ShoppingItemRequest;
 import com.dailytracker.nutrition.dto.ShoppingItemResponse;
 import com.dailytracker.nutrition.entity.ShoppingItem;
 import com.dailytracker.nutrition.exception.ResourceNotFoundException;
+import com.dailytracker.nutrition.external.OpenPricesClient;
 import com.dailytracker.nutrition.repository.ShoppingItemRepository;
 import com.dailytracker.nutrition.shopping.ShoppingCategory;
 import java.util.Optional;
@@ -27,11 +28,14 @@ class ShoppingListServiceTest {
     @Mock
     private ShoppingItemRepository items;
 
+    @Mock
+    private OpenPricesClient openPrices;
+
     @Test
     void addTrimsTheNameAndStartsUnchecked() {
         when(items.save(any(ShoppingItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ShoppingItemResponse saved = new ShoppingListService(items)
+        ShoppingItemResponse saved = new ShoppingListService(items, openPrices)
                 .add(USER, new ShoppingItemRequest("  Greek yogurt ", " 500 g ", ShoppingCategory.DAIRY));
 
         assertEquals("Greek yogurt", saved.name());
@@ -45,7 +49,7 @@ class ShoppingListServiceTest {
         when(items.findByIdAndUserId(item.getId(), USER)).thenReturn(Optional.of(item));
         when(items.save(any(ShoppingItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ShoppingItemResponse updated = new ShoppingListService(items).setChecked(USER, item.getId(), true);
+        ShoppingItemResponse updated = new ShoppingListService(items, openPrices).setChecked(USER, item.getId(), true);
 
         assertEquals(true, updated.checked());
     }
@@ -55,6 +59,6 @@ class ShoppingListServiceTest {
         UUID id = UUID.randomUUID();
         when(items.findByIdAndUserId(id, USER)).thenReturn(Optional.empty());
 
-        assertThrows(ResourceNotFoundException.class, () -> new ShoppingListService(items).setChecked(USER, id, true));
+        assertThrows(ResourceNotFoundException.class, () -> new ShoppingListService(items, openPrices).setChecked(USER, id, true));
     }
 }

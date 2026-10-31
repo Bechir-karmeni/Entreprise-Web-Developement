@@ -237,7 +237,7 @@ export function MealLogDialog({ onClose }: { onClose: () => void }) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t.mealLog.searchPlaceholder}
             aria-label={t.mealLog.searchPlaceholder}
-            className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-600 focus:outline-none"
+            className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-600 focus:outline-none bg-white text-slate-900 [color-scheme:light]"
           />
 
           <div className="flex flex-wrap items-center gap-2 text-xs">

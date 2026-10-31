@@ -13,7 +13,7 @@ import java.util.Map;
  * @param fatShareOfCalories       share of daily calories from fat (0.25 = 25 %)
  * @param fiberGramsPerThousandKcal fiber target per 1000 kcal (14 g is a common guideline)
  * @param waterMlPerKg             water recommendation per kg body weight
- * @param minimumCalories          lowest calorie target the system will suggest
+ * @param minimumCalories          lowest calorie target per sex; the system never suggests less
  */
 public record NutritionSettings(
         Map<ActivityLevel, Double> activityFactors,
@@ -22,17 +22,18 @@ public record NutritionSettings(
         double fatShareOfCalories,
         double fiberGramsPerThousandKcal,
         double waterMlPerKg,
-        int minimumCalories) {
+        Map<Sex, Integer> minimumCalories) {
 
     public NutritionSettings {
         activityFactors = Map.copyOf(requireAll(activityFactors, ActivityLevel.class, "activityFactors"));
         calorieAdjustments = Map.copyOf(requireAll(calorieAdjustments, NutritionGoal.class, "calorieAdjustments"));
         proteinGramsPerKg = Map.copyOf(requireAll(proteinGramsPerKg, NutritionGoal.class, "proteinGramsPerKg"));
+        minimumCalories = Map.copyOf(requireAll(minimumCalories, Sex.class, "minimumCalories"));
         if (fatShareOfCalories <= 0 || fatShareOfCalories >= 1) {
             throw new IllegalArgumentException("fatShareOfCalories must be between 0 and 1");
         }
-        if (minimumCalories <= 0) {
-            throw new IllegalArgumentException("minimumCalories must be positive");
+        if (minimumCalories.values().stream().anyMatch(value -> value <= 0)) {
+            throw new IllegalArgumentException("minimumCalories must be positive for every sex");
         }
     }
 
@@ -59,7 +60,12 @@ public record NutritionSettings(
         protein.put(NutritionGoal.GAIN_MUSCLE, 2.2);
         protein.put(NutritionGoal.GENERAL_HEALTHY_EATING, 1.2);
 
-        return new NutritionSettings(activity, adjustments, protein, 0.25, 14.0, 35.0, 1200);
+        // Floors follow common guidelines: about 1500 kcal for men, 1200 kcal for women.
+        Map<Sex, Integer> minimum = new EnumMap<>(Sex.class);
+        minimum.put(Sex.MALE, 1500);
+        minimum.put(Sex.FEMALE, 1200);
+
+        return new NutritionSettings(activity, adjustments, protein, 0.25, 14.0, 35.0, minimum);
     }
 
     private static <K extends Enum<K>, V> Map<K, V> requireAll(Map<K, V> values, Class<K> keyType, String name) {

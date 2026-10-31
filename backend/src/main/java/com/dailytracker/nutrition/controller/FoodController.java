@@ -5,6 +5,7 @@ import com.dailytracker.nutrition.dto.FoodResponse;
 import com.dailytracker.nutrition.dto.PageResponse;
 import com.dailytracker.nutrition.food.FoodScope;
 import com.dailytracker.nutrition.service.ExternalFoodService;
+import com.dailytracker.nutrition.service.FoodFavoriteService;
 import com.dailytracker.nutrition.service.FoodService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,10 +30,37 @@ public class FoodController {
 
     private final FoodService foodService;
     private final ExternalFoodService externalFoodService;
+    private final FoodFavoriteService favoriteService;
 
-    public FoodController(FoodService foodService, ExternalFoodService externalFoodService) {
+    public FoodController(FoodService foodService, ExternalFoodService externalFoodService,
+                          FoodFavoriteService favoriteService) {
         this.foodService = foodService;
         this.externalFoodService = externalFoodService;
+        this.favoriteService = favoriteService;
+    }
+
+    /** Looks up a product by its barcode in Open Food Facts, saves it, and returns it. */
+    @GetMapping("/barcode/{code}")
+    public FoodResponse barcode(@PathVariable String code) {
+        return externalFoodService.lookupBarcode(code);
+    }
+
+    /** The user's starred foods, most recently starred first. */
+    @GetMapping("/favorites")
+    public List<FoodResponse> favorites(@AuthenticationPrincipal UUID userId) {
+        return favoriteService.list(userId);
+    }
+
+    @PutMapping("/{id}/favorite")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void addFavorite(@AuthenticationPrincipal UUID userId, @PathVariable UUID id) {
+        favoriteService.add(userId, id);
+    }
+
+    @DeleteMapping("/{id}/favorite")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeFavorite(@AuthenticationPrincipal UUID userId, @PathVariable UUID id) {
+        favoriteService.remove(userId, id);
     }
 
     /** Searches shared foods (scope=COMMON, the default) or the user's own custom foods (scope=CUSTOM). */

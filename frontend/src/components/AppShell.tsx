@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { MealLogDialog } from "./MealLogDialog";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { LunchSuggestionHost } from "./LunchSuggestionHost";
 import { useAuth } from "../auth/useAuth";
 import { useI18n } from "../i18n/useI18n";
 
@@ -55,7 +56,8 @@ export function AppShell({ title, subtitle, actions, topStat, children }: AppShe
     <div className="min-h-screen bg-[#f6f7fb] text-slate-900 lg:flex">
       <aside className="flex flex-col border-b border-slate-200 bg-white p-4 lg:w-64 lg:shrink-0 lg:border-b-0 lg:border-r lg:p-6">
         <div className="flex items-center gap-2">
-          <span className="text-lg font-bold tracking-tight text-emerald-900">Daily Tracker</span>
+          <img src="/logo.svg" alt="" width={32} height={32} className="h-8 w-8" />
+          <span className="text-lg font-bold tracking-tight text-emerald-900">NutriDay</span>
           <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-emerald-700">
             NUTRITION
           </span>
@@ -139,10 +141,11 @@ export function AppShell({ title, subtitle, actions, topStat, children }: AppShe
             + {t.common.logMeal}
           </button>
           {logOpen && <MealLogDialog onClose={() => setLogOpen(false)} />}
+          <LunchSuggestionHost />
           <LanguageSwitcher />
           <button
             type="button"
-            className="lg:hidden rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
             onClick={handleLogout}
           >
             {t.common.logout}

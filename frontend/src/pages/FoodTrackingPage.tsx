@@ -1,17 +1,25 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppShell } from "../components/AppShell";
 import { QuickAddFoodDialog } from "../components/QuickAddFoodDialog";
+import { MealPhotoScan } from "../components/MealPhotoScan";
 import { ApiError } from "../api/http";
 import { foodApi } from "../api/foodApi";
+import { shoppingApi } from "../api/shoppingApi";
 import { nutritionApi } from "../api/nutritionApi";
 import { useI18n } from "../i18n/useI18n";
 import { useFoodLogChanged } from "../lib/foodEvents";
+import { addRecentScan, readRecentScans, withBarcode, writeRecentScans, type RecentScan } from "../lib/recentScans";
 import type { Messages } from "../i18n/en";
 import { MEAL_ORDER, defaultMealFor, formatAllergen, localDateIso, parseAmount } from "../lib/foodLog";
-import type { DayLog, FoodItem, FoodScope, FoodSource, MealType } from "../types/food";
+import type { DayLog, FoodItem, FoodSource, MealType } from "../types/food";
 import type { TargetsResponse } from "../types/nutrition";
 
 const MIN_QUERY_LENGTH = 3;
+const BARCODE_PATTERN = /^\d{6,14}$/;
+
+/** Filter chips. Common and Branded search the shared foods; Custom searches the user's own foods. */
+type FoodView = "COMMON" | "BRANDED" | "FAVORITES" | "CUSTOM";
+type InputMode = "SEARCH" | "BARCODE";
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -28,8 +36,17 @@ export default function FoodTrackingPage() {
   const { t } = useI18n();
   const today = useMemo(() => localDateIso(new Date()), []);
   const [meal, setMeal] = useState<MealType>(() => defaultMealFor(new Date().getHours()));
-  const [scope, setScope] = useState<FoodScope>("COMMON");
+  const [view, setView] = useState<FoodView>("COMMON");
+  const [mode, setMode] = useState<InputMode>("SEARCH");
+  const photoRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
+  const [barcodeText, setBarcodeText] = useState("");
+  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null);
+  const [shoppingNotice, setShoppingNotice] = useState<string | null>(null);
+  const [addingToShopping, setAddingToShopping] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [recentScans, setRecentScans] = useState<RecentScan[]>(() => readRecentScans());
+  const [favorites, setFavorites] = useState<FoodItem[]>([]);
   const [localResults, setLocalResults] = useState<FoodItem[]>([]);
   const [onlineResults, setOnlineResults] = useState<FoodItem[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -63,20 +80,27 @@ export default function FoodTrackingPage() {
       .getTargets()
       .then(setTargets)
       .catch(() => setTargets(null));
+    foodApi
+      .favorites()
+      .then(setFavorites)
+      .catch(() => setFavorites([]));
     // Loaded once for today's date; the page is not reloaded when the date changes.
   }, []);
 
   // Local search. Shared foods need 3 characters; the user's own foods are listed even without text.
+  // Favorites and barcode mode do not use this search.
   useEffect(() => {
     const text = query.trim();
-    const enough = scope === "CUSTOM" || text.length >= MIN_QUERY_LENGTH;
     setOnlineResults(null);
     setSearchError(null);
-    if (!enough) {
+    const searchable = mode === "SEARCH" && view !== "FAVORITES";
+    const enough = view === "CUSTOM" || text.length >= MIN_QUERY_LENGTH;
+    if (!searchable || !enough) {
       setLocalResults([]);
       setSearching(false);
       return;
     }
+    const scope = view === "CUSTOM" ? "CUSTOM" : "COMMON";
     let cancelled = false;
     setSearching(true);
     const timer = window.setTimeout(() => {
@@ -96,7 +120,7 @@ export default function FoodTrackingPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, scope, t.common.genericError]);
+  }, [query, view, mode, t.common.genericError]);
 
   async function searchOnline() {
     const text = query.trim();
@@ -110,6 +134,66 @@ export default function FoodTrackingPage() {
     } finally {
       setOnlineBusy(false);
     }
+  }
+
+  /** Looks up a barcode typed by hand or read by the camera, and remembers the product in Recent Scans. */
+  async function lookupBarcode(code: string) {
+    const digits = code.replace(/\s/g, "");
+    setBarcodeText(digits);
+    setScanning(false);
+    if (!BARCODE_PATTERN.test(digits)) {
+      setOnlineResults(null);
+      setSearchError(t.food.barcodeInvalid);
+      return;
+    }
+    setOnlineBusy(true);
+    setSearchError(null);
+    try {
+      const food = await foodApi.barcode(digits);
+      setOnlineResults([food]);
+      setScannedBarcode(digits);
+      setShoppingNotice(null);
+      const next = addRecentScan(recentScans, withBarcode(food, digits));
+      setRecentScans(next);
+      writeRecentScans(next);
+    } catch (error) {
+      setOnlineResults(null);
+      setScannedBarcode(null);
+      setSearchError(errorText(error, t.common.genericError));
+    } finally {
+      setOnlineBusy(false);
+    }
+  }
+
+  function handleBarcodeSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void lookupBarcode(barcodeText);
+  }
+
+  /** Adds the scanned product to the shopping list, with its barcode so its store prices can be looked up. */
+  async function addToShopping(food: FoodItem, barcode: string) {
+    setAddingToShopping(true);
+    setActionError(null);
+    setShoppingNotice(null);
+    try {
+      await shoppingApi.add({
+        name: food.name.slice(0, 100),
+        quantity: `${food.servingSize} ${food.servingUnit}`.slice(0, 40),
+        category: "OTHER",
+        barcode,
+      });
+      setShoppingNotice(t.food.addedToShopping);
+    } catch (error) {
+      setActionError(errorText(error, t.common.genericError));
+    } finally {
+      setAddingToShopping(false);
+    }
+  }
+
+  function changeMode(next: InputMode) {
+    setMode(next);
+    setScanning(false);
+    setActionError(null);
   }
 
   async function addFood(food: FoodItem) {
@@ -150,6 +234,7 @@ export default function FoodTrackingPage() {
     try {
       await foodApi.deleteFood(food.id);
       setLocalResults((current) => current.filter((item) => item.id !== food.id));
+      setFavorites((current) => current.filter((item) => item.id !== food.id));
     } catch (error) {
       setActionError(errorText(error, t.common.genericError));
     } finally {
@@ -157,15 +242,59 @@ export default function FoodTrackingPage() {
     }
   }
 
+  async function toggleFavorite(food: FoodItem) {
+    const wasFavorite = favoriteIds.has(food.id);
+    setActionError(null);
+    try {
+      await foodApi.setFavorite(food.id, !wasFavorite);
+      setFavorites((current) =>
+        wasFavorite
+          ? current.filter((item) => item.id !== food.id)
+          : [food, ...current.filter((item) => item.id !== food.id)],
+      );
+    } catch (error) {
+      setActionError(errorText(error, t.common.genericError));
+    }
+  }
+
   function handleCustomFoodCreated(food: FoodItem, addAnother: boolean) {
     if (!addAnother) setDialogOpen(false);
     setNotice(`${t.food.saved} ${food.name}`);
     setQuery("");
-    setScope("CUSTOM");
+    setView("CUSTOM");
   }
 
-  const shownResults = onlineResults ?? localResults;
-  const typedEnough = scope === "CUSTOM" || query.trim().length >= MIN_QUERY_LENGTH;
+  const favoriteIds = useMemo(() => new Set(favorites.map((food) => food.id)), [favorites]);
+  const favoriteMatches = useMemo(() => {
+    const text = query.trim().toLowerCase();
+    if (!text) return favorites;
+    return favorites.filter((food) => `${food.name} ${food.brand ?? ""}`.toLowerCase().includes(text));
+  }, [favorites, query]);
+
+  const needsText = view === "COMMON" || view === "BRANDED";
+  const typedEnough = !needsText || query.trim().length >= MIN_QUERY_LENGTH;
+  const searchResults = onlineResults ?? localResults;
+
+  let shownResults: FoodItem[];
+  if (mode === "BARCODE") {
+    shownResults = onlineResults ?? [];
+  } else if (view === "FAVORITES") {
+    shownResults = favoriteMatches;
+  } else if (view === "BRANDED") {
+    shownResults = searchResults.filter((food) => Boolean(food.brand));
+  } else {
+    shownResults = searchResults;
+  }
+
+  const emptyMessage =
+    view === "FAVORITES"
+      ? favorites.length === 0
+        ? t.food.favoritesEmpty
+        : t.food.noResults
+      : view === "CUSTOM"
+        ? t.food.customEmpty
+        : t.food.noResults;
+
   const consumed = day?.totals.calories ?? 0;
   const topStat =
     day && targets ? `${consumed.toLocaleString()} / ${targets.calories.toLocaleString()} kcal` : undefined;
@@ -177,7 +306,13 @@ export default function FoodTrackingPage() {
       topStat={topStat}
       actions={
         <>
-          <SoonButton label={t.food.recentScans} />
+          <button
+            type="button"
+            onClick={() => changeMode("BARCODE")}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            {t.food.recentScans}
+          </button>
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
@@ -190,38 +325,85 @@ export default function FoodTrackingPage() {
     >
       <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70 sm:p-6">
         <div className="flex flex-wrap gap-2">
-          <span className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">
+          <ModeButton active={mode === "SEARCH"} onClick={() => changeMode("SEARCH")}>
             {t.food.modeSearch}
-          </span>
-          <SoonButton label={t.food.modeAi} />
-          <SoonButton label={t.food.modeBarcode} />
+          </ModeButton>
+          <ModeButton active={false} onClick={() => photoRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            {t.food.modeAi}
+          </ModeButton>
+          <ModeButton active={mode === "BARCODE"} onClick={() => changeMode("BARCODE")}>
+            {t.food.modeBarcode}
+          </ModeButton>
         </div>
 
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-slate-300 px-4 py-2.5 focus-within:border-emerald-600">
-          <span aria-hidden="true" className="text-slate-400">
-            &#x2315;
-          </span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t.food.searchPlaceholder}
-            aria-label={t.food.searchPlaceholder}
-            className="min-w-0 flex-1 bg-transparent text-sm focus:outline-none"
-          />
-          <kbd className="hidden rounded border border-slate-300 px-1.5 text-[10px] text-slate-500 sm:inline">{t.food.escHint}</kbd>
-        </div>
+        {mode === "SEARCH" ? (
+          <>
+            <div className="mt-4 flex items-center gap-3 rounded-xl border border-slate-300 px-4 py-2.5 focus-within:border-emerald-600 bg-white text-slate-900 [color-scheme:light]">
+              <span aria-hidden="true" className="text-slate-400">
+                &#x2315;
+              </span>
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t.food.searchPlaceholder}
+                aria-label={t.food.searchPlaceholder}
+                className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 [color-scheme:light] focus:outline-none"
+              />
+              <kbd className="hidden rounded border border-slate-300 px-1.5 text-[10px] text-slate-500 sm:inline">
+                {t.food.escHint}
+              </kbd>
+            </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Chip active={scope === "COMMON"} onClick={() => setScope("COMMON")}>
-            {t.food.chipCommon}
-          </Chip>
-          <SoonChip label={t.food.chipBranded} />
-          <Chip active={scope === "CUSTOM"} onClick={() => setScope("CUSTOM")}>
-            {t.food.chipCustom}
-          </Chip>
-          <SoonChip label={t.food.chipFavorites} />
-        </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Chip active={view === "COMMON"} onClick={() => setView("COMMON")}>
+                {t.food.chipCommon}
+              </Chip>
+              <Chip active={view === "BRANDED"} onClick={() => setView("BRANDED")}>
+                {t.food.chipBranded}
+              </Chip>
+              <Chip active={view === "CUSTOM"} onClick={() => setView("CUSTOM")}>
+                {t.food.chipCustom}
+              </Chip>
+              <Chip active={view === "FAVORITES"} onClick={() => setView("FAVORITES")}>
+                {t.food.chipFavorites}
+              </Chip>
+            </div>
+          </>
+        ) : (
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setScanning((current) => !current)}
+              className="rounded-lg border border-emerald-700 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
+            >
+              {scanning ? t.food.stopScanning : t.food.scanWithCamera}
+            </button>
+            {scanning && (
+              <div className="mt-4">
+                <CameraScanner onDetected={(code) => void lookupBarcode(code)} onClose={() => setScanning(false)} />
+              </div>
+            )}
+          <form onSubmit={handleBarcodeSubmit} className="mt-4 flex flex-wrap items-center gap-3">
+            <input
+              inputMode="numeric"
+              value={barcodeText}
+              onChange={(event) => setBarcodeText(event.target.value)}
+              placeholder={t.food.barcodePlaceholder}
+              aria-label={t.food.barcodePlaceholder}
+              className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-emerald-600 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={onlineBusy || barcodeText.trim().length === 0}
+              className="rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {onlineBusy ? t.food.lookingUp : t.food.lookupBarcode}
+            </button>
+            <p className="w-full text-xs text-slate-500">{t.food.barcodeHint}</p>
+          </form>
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-slate-600">
@@ -238,7 +420,7 @@ export default function FoodTrackingPage() {
               ))}
             </select>
           </label>
-          {scope === "COMMON" && (
+          {mode === "SEARCH" && needsText && (
             <button
               type="button"
               onClick={searchOnline}
@@ -249,7 +431,8 @@ export default function FoodTrackingPage() {
             </button>
           )}
         </div>
-        {scope === "COMMON" && <p className="mt-2 text-xs text-slate-500">{t.food.onlineHint}</p>}
+        {mode === "SEARCH" && view === "COMMON" && <p className="mt-2 text-xs text-slate-500">{t.food.onlineHint}</p>}
+        {mode === "SEARCH" && view === "BRANDED" && <p className="mt-2 text-xs text-slate-500">{t.food.brandedHint}</p>}
 
         {notice && <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
         {searchError && (
@@ -257,10 +440,12 @@ export default function FoodTrackingPage() {
             {searchError}
           </p>
         )}
-        {!typedEnough && query.trim().length > 0 && <p className="mt-4 text-sm text-slate-500">{t.food.minChars}</p>}
+        {mode === "SEARCH" && !typedEnough && query.trim().length > 0 && (
+          <p className="mt-4 text-sm text-slate-500">{t.food.minChars}</p>
+        )}
         {searching && <p className="mt-4 text-sm text-slate-500">{t.common.loading}</p>}
-        {!searching && typedEnough && shownResults.length === 0 && !searchError && (
-          <p className="mt-4 text-sm text-slate-500">{scope === "CUSTOM" ? t.food.customEmpty : t.food.noResults}</p>
+        {mode === "SEARCH" && !searching && typedEnough && !searchError && shownResults.length === 0 && (
+          <p className="mt-4 text-sm text-slate-500">{emptyMessage}</p>
         )}
 
         {shownResults.length > 0 && (
@@ -273,18 +458,68 @@ export default function FoodTrackingPage() {
                 mealLabel={t.food.meals[meal]}
                 amount={amounts[food.id] ?? String(food.servingSize)}
                 busy={busyId === food.id}
+                isFavorite={favoriteIds.has(food.id)}
                 onAmountChange={(value) => setAmounts((current) => ({ ...current, [food.id]: value }))}
                 onAdd={() => addFood(food)}
+                onToggleFavorite={() => toggleFavorite(food)}
                 onDelete={food.source === "CUSTOM" ? () => deleteCustomFood(food) : undefined}
               />
             ))}
           </ul>
         )}
+        {mode === "BARCODE" && onlineResults !== null && scannedBarcode && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => onlineResults && scannedBarcode && addToShopping(onlineResults[0], scannedBarcode)}
+              disabled={addingToShopping}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-100 disabled:opacity-50"
+            >
+              {t.food.addToShopping}
+            </button>
+            {shoppingNotice && (
+              <p role="status" className="text-sm text-emerald-700">
+                {shoppingNotice}
+              </p>
+            )}
+          </div>
+        )}
+        {mode === "BARCODE" && onlineResults === null && (
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold">{t.food.recentScansTitle}</h3>
+            {recentScans.length === 0 ? (
+              <p className="mt-2 text-sm text-slate-500">{t.food.recentScansEmpty}</p>
+            ) : (
+              <ul className="mt-2 divide-y divide-slate-200">
+                {recentScans.map((food) => (
+                  <FoodRow
+                    key={food.id}
+                    food={food}
+                    isTopMatch={false}
+                    mealLabel={t.food.meals[meal]}
+                    amount={amounts[food.id] ?? String(food.servingSize)}
+                    busy={busyId === food.id}
+                    isFavorite={favoriteIds.has(food.id)}
+                    onAmountChange={(value) => setAmounts((current) => ({ ...current, [food.id]: value }))}
+                    onAdd={() => addFood(food)}
+                    onToggleFavorite={() => toggleFavorite(food)}
+                    onAddToShopping={food.barcode ? () => addToShopping(food, food.barcode ?? "") : undefined}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <PlaceholderPanel title={t.food.aiPanelTitle} />
-        <PlaceholderPanel title={t.food.barcodePanelTitle} />
+      <div ref={photoRef}>
+        <MealPhotoScan
+          title={t.food.aiPanelTitle}
+          mealType={meal}
+          mealLabel={t.food.meals[meal]}
+          date={today}
+          onLogged={loadDay}
+        />
       </div>
 
       {actionError && (
@@ -307,6 +542,99 @@ export default function FoodTrackingPage() {
   );
 }
 
+type BarcodeDetectorLike = { detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+type BarcodeDetectorConstructor = new (options: { formats: string[] }) => BarcodeDetectorLike;
+
+/**
+ * Reads a barcode from the camera with the browser's BarcodeDetector. Browsers without it (Firefox, for
+ * example) show a message, and the barcode can still be typed.
+ */
+function CameraScanner({ onDetected, onClose }: { onDetected: (code: string) => void; onClose: () => void }) {
+  const { t } = useI18n();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const onDetectedRef = useRef(onDetected);
+  const [status, setStatus] = useState<"starting" | "scanning" | "denied" | "unsupported">("starting");
+
+  useEffect(() => {
+    onDetectedRef.current = onDetected;
+  }, [onDetected]);
+
+  useEffect(() => {
+    const DetectorClass = (window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
+    if (!DetectorClass || !navigator.mediaDevices?.getUserMedia) {
+      setStatus("unsupported");
+      return;
+    }
+    const detector = new DetectorClass({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+    let cancelled = false;
+    let stream: MediaStream | null = null;
+    let timer: number | null = null;
+
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" } })
+      .then(async (media) => {
+        if (cancelled) {
+          media.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        stream = media;
+        const video = videoRef.current;
+        if (!video) return;
+        video.srcObject = media;
+        await video.play();
+        setStatus("scanning");
+        timer = window.setInterval(async () => {
+          const frame = videoRef.current;
+          if (!frame || cancelled) return;
+          try {
+            const [first] = await detector.detect(frame);
+            if (first && first.rawValue && !cancelled) {
+              cancelled = true;
+              onDetectedRef.current(first.rawValue);
+            }
+          } catch {
+            // A frame that cannot be read is skipped; the next frame is tried.
+          }
+        }, 400);
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("denied");
+      });
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearInterval(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  if (status === "unsupported") {
+    return (
+      <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+        <p>{t.food.cameraUnsupported}</p>
+        <button type="button" onClick={onClose} className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-100">
+          {t.food.stopScanning}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <video ref={videoRef} playsInline muted className="aspect-video w-full rounded-xl bg-slate-900 object-cover" />
+      <p
+        role={status === "denied" ? "alert" : undefined}
+        className={`text-xs ${status === "denied" ? "text-red-700" : "text-slate-500"}`}
+      >
+        {status === "denied" ? t.food.cameraDenied : t.food.scanHint}
+      </p>
+      <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-100">
+        {t.food.stopScanning}
+      </button>
+    </div>
+  );
+}
+
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
@@ -322,43 +650,18 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   );
 }
 
-function SoonChip({ label }: { label: string }) {
-  const { t } = useI18n();
-  return (
-    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-400">
-      {label} · {t.common.comingSoon}
-    </span>
-  );
-}
-
-function SoonButton({ label }: { label: string }) {
-  const { t } = useI18n();
+function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
-      disabled
-      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-400"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+        active ? "bg-emerald-700 text-white" : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+      }`}
     >
-      {label}
-      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase">{t.common.comingSoon}</span>
+      {children}
     </button>
-  );
-}
-
-function PlaceholderPanel({ title }: { title: string }) {
-  const { t } = useI18n();
-  return (
-    <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/70">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-semibold">{title}</h2>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-500">
-          {t.common.comingSoon}
-        </span>
-      </div>
-      <div className="mt-4 flex h-44 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
-        {t.food.comingSoonText}
-      </div>
-    </section>
   );
 }
 
@@ -368,18 +671,24 @@ function FoodRow({
   mealLabel,
   amount,
   busy,
+  isFavorite,
   onAmountChange,
   onAdd,
+  onToggleFavorite,
   onDelete,
+  onAddToShopping,
 }: {
   food: FoodItem;
   isTopMatch: boolean;
   mealLabel: string;
   amount: string;
   busy: boolean;
+  isFavorite: boolean;
   onAmountChange: (value: string) => void;
   onAdd: () => void;
+  onToggleFavorite: () => void;
   onDelete?: () => void;
+  onAddToShopping?: () => void;
 }) {
   const { t } = useI18n();
   const origin = [food.brand, sourceLabel(food.source, t.food)].filter(Boolean).join(" · ");
@@ -392,7 +701,28 @@ function FoodRow({
           {food.name.charAt(0).toUpperCase()}
         </span>
         <div className="min-w-0">
-          <p className="font-semibold">{food.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-semibold">{food.name}</p>
+            <button
+              type="button"
+              onClick={onToggleFavorite}
+              aria-pressed={isFavorite}
+              aria-label={isFavorite ? t.food.unfavorite : t.food.favorite}
+              title={isFavorite ? t.food.unfavorite : t.food.favorite}
+              className="shrink-0 text-lg leading-none text-amber-500 hover:scale-110"
+            >
+              {isFavorite ? "★" : "☆"}
+            </button>
+            {onAddToShopping && (
+              <button
+                type="button"
+                onClick={onAddToShopping}
+                className="shrink-0 rounded border border-slate-300 px-2 py-0.5 text-xs font-medium hover:bg-slate-100"
+              >
+                {t.food.addToShopping}
+              </button>
+            )}
+          </div>
           <p className="text-xs text-slate-500">
             {origin}
             {origin && " · "}

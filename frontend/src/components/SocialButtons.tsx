@@ -1,35 +1,97 @@
-import { useState } from "react";
-import { AppleIcon } from "./icons";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { authApi } from "../api/authApi";
+import { ApiError } from "../api/http";
+
+const GOOGLE_SCRIPT = "https://accounts.google.com/gsi/client";
+/** Public OAuth client ID from Google Cloud Console. Set VITE_GOOGLE_CLIENT_ID in frontend/.env. */
+const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "");
+
+interface GoogleCredentialResponse {
+  credential: string;
+}
+
+interface GoogleIdApi {
+  initialize: (config: { client_id: string; callback: (response: GoogleCredentialResponse) => void }) => void;
+  renderButton: (parent: HTMLElement, options: { theme?: string; size?: string; text?: string; shape?: string; width?: number }) => void;
+}
+
+declare global {
+  interface Window {
+    google?: { accounts: { id: GoogleIdApi } };
+  }
+}
+
+/** Loads Google's sign-in script once. */
+function loadGoogleScript(): Promise<void> {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const script = document.querySelector<HTMLScriptElement>(`script[src="${GOOGLE_SCRIPT}"]`) ?? document.createElement("script");
+    if (!script.src) {
+      script.src = GOOGLE_SCRIPT;
+      script.async = true;
+      document.head.appendChild(script);
+    }
+    script.addEventListener("load", () => resolve());
+    script.addEventListener("error", () => reject(new Error("Google sign-in script could not be loaded.")));
+  });
+}
 
 /**
- * Google and Apple sign-in buttons from the design. The backend has no OAuth yet,
- * so clicking them only shows a notice.
+ * "Google" sign-in. Google's button picks the account; the backend then emails a sign-in code,
+ * and the user enters it on the verification page.
  */
 export function SocialButtons({ verb }: { verb: "Sign up with" | "" }) {
+  const navigate = useNavigate();
+  const buttonRef = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const label = (provider: string) => (verb ? `${verb} ${provider}` : provider);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) {
+      setNotice("Google sign-in is not set up yet.");
+      return;
+    }
+    let active = true;
+    loadGoogleScript()
+      .then(() => {
+        if (!active || !buttonRef.current || !window.google) return;
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            void handleCredential(response.credential);
+          },
+        });
+        window.google.accounts.id.renderButton(buttonRef.current, {
+          theme: "outline",
+          size: "large",
+          text: verb ? "signup_with" : "signin_with",
+          shape: "pill",
+          width: buttonRef.current.clientWidth,
+        });
+      })
+      .catch(() => {
+        if (active) setNotice("Google sign-in could not be loaded. Check your connection.");
+      });
+    return () => {
+      active = false;
+    };
+    // handleCredential only uses navigate, which is stable.
+  }, [verb]);
+
+  async function handleCredential(idToken: string) {
+    setNotice(null);
+    try {
+      const pending = await authApi.googleSignIn(idToken);
+      navigate(`/verify-email?email=${encodeURIComponent(pending.email)}&mode=google`);
+    } catch (error) {
+      setNotice(error instanceof ApiError ? error.message : "Google sign-in failed. Please try again.");
+    }
+  }
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => setNotice("Google sign-in is not part of this version.")}
-          className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#f2f4fb] text-sm font-medium text-slate-800 hover:bg-[#e8ebf6]"
-        >
-          <span className="text-base font-bold text-[#4285F4]">G</span>
-          {label("Google")}
-        </button>
-        <button
-          type="button"
-          onClick={() => setNotice("Apple sign-in is not part of this version.")}
-          className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#f2f4fb] text-sm font-medium text-slate-800 hover:bg-[#e8ebf6]"
-        >
-          <AppleIcon className="h-4 w-4" />
-          {label("Apple")}
-        </button>
-      </div>
-      {notice && <p className="text-center text-xs text-slate-500">{notice}</p>}
+      <div ref={buttonRef} className="flex min-h-11 justify-center" />
+      {notice && <p role="status" className="text-center text-xs text-slate-500">{notice}</p>}
     </div>
   );
 }

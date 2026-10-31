@@ -10,7 +10,7 @@ import java.util.Objects;
  *   <li>BMR with the Mifflin-St Jeor equation:
  *       10 x weight(kg) + 6.25 x height(cm) - 5 x age + 5 (men) or - 161 (women).</li>
  *   <li>TDEE = BMR x activity factor.</li>
- *   <li>Calories = TDEE + goal adjustment, but never below the configured minimum.</li>
+ *   <li>Calories = TDEE + goal adjustment, but never below the minimum for the user's sex.</li>
  *   <li>Protein = body weight x grams per kg for the goal (4 kcal per gram).</li>
  *   <li>Fat = share of calories (9 kcal per gram).</li>
  *   <li>Carbohydrates = calories that remain after protein and fat (4 kcal per gram), never negative.</li>
@@ -52,8 +52,9 @@ public final class NutritionTargetCalculator {
         double bmr = basalMetabolicRate(profile.sex(), profile.weightKg(), profile.heightCm(), age);
         double tdee = bmr * settings.activityFactors().get(profile.activityLevel());
         double rawCalories = tdee + settings.calorieAdjustments().get(profile.goal());
-        boolean minimumApplied = rawCalories < settings.minimumCalories();
-        double calories = Math.max(rawCalories, settings.minimumCalories());
+        int floor = settings.minimumCalories().get(profile.sex());
+        boolean minimumApplied = rawCalories < floor;
+        double calories = Math.max(rawCalories, floor);
 
         long protein = Math.round(profile.weightKg() * settings.proteinGramsPerKg().get(profile.goal()));
         long fat = Math.round(calories * settings.fatShareOfCalories() / KCAL_PER_GRAM_FAT);

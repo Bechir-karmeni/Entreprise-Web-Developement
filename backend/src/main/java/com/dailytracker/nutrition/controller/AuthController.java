@@ -1,9 +1,14 @@
 package com.dailytracker.nutrition.controller;
 
 import com.dailytracker.nutrition.dto.AuthResponse;
+import com.dailytracker.nutrition.dto.GoogleSignInRequest;
 import com.dailytracker.nutrition.dto.LoginRequest;
+import com.dailytracker.nutrition.dto.PendingVerificationResponse;
 import com.dailytracker.nutrition.dto.RefreshTokenRequest;
 import com.dailytracker.nutrition.dto.RegisterRequest;
+import com.dailytracker.nutrition.dto.ResetPasswordRequest;
+import com.dailytracker.nutrition.dto.ResendCodeRequest;
+import com.dailytracker.nutrition.dto.VerifyEmailRequest;
 import com.dailytracker.nutrition.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -23,9 +28,53 @@ public class AuthController {
         this.authService = authService;
     }
 
+    /** Creates the account and emails a code. No tokens are returned until the email is confirmed. */
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<PendingVerificationResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    }
+
+    @PostMapping("/verify-email")
+    public AuthResponse verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        return authService.verifyEmail(request);
+    }
+
+    @PostMapping("/resend-code")
+    public ResponseEntity<Void> resendCode(@Valid @RequestBody ResendCodeRequest request) {
+        authService.resendCode(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Google sign-in step 1: checks the Google token, creates the account if needed, and emails a sign-in code. */
+    @PostMapping("/google")
+    public PendingVerificationResponse googleSignIn(@Valid @RequestBody GoogleSignInRequest request) {
+        return authService.googleSignIn(request.idToken());
+    }
+
+    /** Google sign-in step 2: the emailed sign-in code gives the tokens. */
+    @PostMapping("/google/verify")
+    public AuthResponse googleVerify(@Valid @RequestBody VerifyEmailRequest request) {
+        return authService.verifyGoogleCode(request);
+    }
+
+    @PostMapping("/google/resend")
+    public ResponseEntity<Void> googleResend(@Valid @RequestBody ResendCodeRequest request) {
+        authService.resendGoogleCode(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Emails a code to reset the password. Same answer for every email, so accounts are not revealed. */
+    @PostMapping("/password/forgot")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ResendCodeRequest request) {
+        authService.requestPasswordReset(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Sets a new password with the emailed code. The user then logs in with the new password. */
+    @PostMapping("/password/reset")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/login")

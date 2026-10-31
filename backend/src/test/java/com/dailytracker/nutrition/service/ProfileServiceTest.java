@@ -9,6 +9,7 @@ import com.dailytracker.nutrition.dto.ProfileRequest;
 import com.dailytracker.nutrition.dto.ProfileResponse;
 import com.dailytracker.nutrition.dto.TargetsResponse;
 import com.dailytracker.nutrition.entity.UserProfile;
+import com.dailytracker.nutrition.exception.InvalidRequestException;
 import com.dailytracker.nutrition.exception.ResourceNotFoundException;
 import com.dailytracker.nutrition.nutrition.ActivityLevel;
 import com.dailytracker.nutrition.nutrition.NutritionGoal;
@@ -52,6 +53,16 @@ class ProfileServiceTest {
 
         assertEquals(Sex.MALE, response.sex());
         assertEquals(80.0, response.weightKg());
+    }
+
+    @Test
+    void rejectsProfilesOfPeopleUnder18() {
+        UUID userId = UUID.randomUUID();
+        // Born 2010-01-01, so 16 years old on the fixed test date 2026-10-08.
+        ProfileRequest request = new ProfileRequest(Sex.MALE, LocalDate.of(2010, 1, 1), 170.0, 60.0,
+                ActivityLevel.MODERATELY_ACTIVE, NutritionGoal.MAINTAIN_WEIGHT);
+
+        assertThrows(InvalidRequestException.class, () -> service().save(userId, request));
     }
 
     @Test

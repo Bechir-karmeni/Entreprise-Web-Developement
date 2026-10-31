@@ -3,11 +3,18 @@ package com.dailytracker.nutrition.dto;
 import com.dailytracker.nutrition.shopping.ShoppingCategory;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record ShoppingItemRequest(
         @NotBlank @Size(max = 100) String name,
         @Size(max = 40) String quantity,
-        @NotNull ShoppingCategory category
+        @NotNull ShoppingCategory category,
+        /** Optional barcode digits (6 to 14). Null or blank means the item has no barcode. */
+        @Pattern(regexp = "^\\s*(\\d{6,14})?\\s*$") String barcode
 ) {
+    /** Keeps existing callers that add items without a barcode working. */
+    public ShoppingItemRequest(String name, String quantity, ShoppingCategory category) {
+        this(name, quantity, category, null);
+    }
 }

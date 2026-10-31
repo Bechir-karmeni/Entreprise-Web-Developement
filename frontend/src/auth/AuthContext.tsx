@@ -1,7 +1,14 @@
 import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { authApi } from "../api/authApi";
 import { ApiError } from "../api/http";
-import type { AuthResponse, LoginInput, RegisterInput, UserSummary } from "../types/auth";
+import type {
+  AuthResponse,
+  LoginInput,
+  PendingVerification,
+  RegisterInput,
+  UserSummary,
+  VerifyEmailInput,
+} from "../types/auth";
 import { readSession, writeSession } from "./session";
 
 export type AuthStatus = "loading" | "authenticated" | "anonymous";
@@ -10,7 +17,11 @@ export interface AuthContextValue {
   user: UserSummary | null;
   status: AuthStatus;
   login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
+  /** Creates the account. The user is not logged in until the emailed code is confirmed. */
+  register: (input: RegisterInput) => Promise<PendingVerification>;
+  verifyEmail: (input: VerifyEmailInput) => Promise<void>;
+  /** Finishes a Google sign-in with the emailed sign-in code. */
+  verifyGoogleCode: (input: VerifyEmailInput) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -75,7 +86,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applyResponse]);
 
   const register = useCallback(async (input: RegisterInput) => {
-    applyResponse(await authApi.register(input));
+    return authApi.register(input);
+  }, []);
+
+  const verifyEmail = useCallback(async (input: VerifyEmailInput) => {
+    applyResponse(await authApi.verifyEmail(input));
+  }, [applyResponse]);
+
+  const verifyGoogleCode = useCallback(async (input: VerifyEmailInput) => {
+    applyResponse(await authApi.googleVerify(input));
   }, [applyResponse]);
 
   const logout = useCallback(async () => {
@@ -87,8 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, login, register, logout }),
-    [user, status, login, register, logout],
+    () => ({ user, status, login, register, verifyEmail, verifyGoogleCode, logout }),
+    [user, status, login, register, verifyEmail, verifyGoogleCode, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

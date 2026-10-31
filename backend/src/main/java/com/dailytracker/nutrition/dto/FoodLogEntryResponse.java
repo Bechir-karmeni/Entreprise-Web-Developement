@@ -3,9 +3,11 @@ package com.dailytracker.nutrition.dto;
 import com.dailytracker.nutrition.entity.FoodLogEntry;
 import com.dailytracker.nutrition.food.MealType;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
+/** loggedAt is when the food was logged, not when it was eaten. */
 public record FoodLogEntryResponse(
         UUID id,
         LocalDate date,
@@ -18,7 +20,8 @@ public record FoodLogEntryResponse(
         double proteinGrams,
         double carbsGrams,
         double fatGrams,
-        double fiberGrams
+        double fiberGrams,
+        Instant loggedAt
 ) {
     public static FoodLogEntryResponse from(FoodLogEntry entry) {
         return new FoodLogEntryResponse(
@@ -33,6 +36,7 @@ public record FoodLogEntryResponse(
                 entry.getProtein(),
                 entry.getCarbs(),
                 entry.getFat(),
-                entry.getFiber());
+                entry.getFiber(),
+                entry.getCreatedAt());
     }
 }

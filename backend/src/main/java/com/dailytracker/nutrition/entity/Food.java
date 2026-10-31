@@ -3,6 +3,7 @@ package com.dailytracker.nutrition.entity;
 import com.dailytracker.nutrition.external.ExternalFood;
 import com.dailytracker.nutrition.food.Allergen;
 import com.dailytracker.nutrition.food.FoodCategory;
+import com.dailytracker.nutrition.food.MicronutrientJson;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -18,6 +19,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -73,6 +75,10 @@ public class Food {
 
     @Column(length = 2000)
     private String ingredients;
+
+    /** Vitamin and mineral amounts per 100 g as JSON text. NULL when the source has no such data. */
+    @Column(name = "micronutrients", length = 2000)
+    private String micronutrientsJson;
 
     @Column(name = "allergens_known", nullable = false)
     private boolean allergensKnown = true;
@@ -149,6 +155,7 @@ public class Food {
         this.carbs = item.carbs();
         this.fat = item.fat();
         this.fiber = item.fiber();
+        this.micronutrientsJson = MicronutrientJson.write(item.micronutrients());
         this.allergensKnown = item.allergensKnown();
         this.allergens.clear();
         this.allergens.addAll(item.allergens());
@@ -189,6 +196,7 @@ public class Food {
     public double getCarbs() { return carbs; }
     public double getFat() { return fat; }
     public double getFiber() { return fiber; }
+    public Map<String, Double> getMicronutrients() { return MicronutrientJson.read(micronutrientsJson); }
     public String getIngredients() { return ingredients; }
     public boolean isAllergensKnown() { return allergensKnown; }
     public Set<Allergen> getAllergens() { return allergens; }
